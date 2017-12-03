@@ -30,6 +30,7 @@ else:
 
 class TaggableRel(ManyToManyRel):
     def __init__(self, field, related_name, through, to=None):
+        super(TaggableRel, self).__init__(field, to=to, related_name=related_name, through=through)
         # rel.to renamed to rel.model in Django 1.9
         if VERSION >= (1, 9):
             self.model = to
@@ -107,7 +108,8 @@ class _TaggableManager(models.Manager):
                      else 'content_object')
         fk = self.through._meta.get_field(fieldname)
         query = {
-            '%s__%s__in' % (self.through.tag_relname(), fk.name): {obj._get_pk_val() for obj in instances}
+            '%s__%s__in' % (self.through.tag_relname(), fk.name):
+                set(obj._get_pk_val() for obj in instances)
         }
         join_table = self.through._meta.db_table
         source_col = fk.column
@@ -122,7 +124,8 @@ class _TaggableManager(models.Manager):
                 attrgetter('_prefetch_related_val'),
                 lambda obj: obj._get_pk_val(),
                 False,
-                self.prefetch_cache_name)
+                self.prefetch_cache_name,
+                False)
 
     def _lookup_kwargs(self):
         return self.through.lookup_kwargs(self.instance)
@@ -132,7 +135,7 @@ class _TaggableManager(models.Manager):
         db = router.db_for_write(self.through, instance=self.instance)
 
         tag_objs = self._to_tag_model_instances(tags)
-        new_ids = {t.pk for t in tag_objs}
+        new_ids = set(t.pk for t in tag_objs)
 
         # NOTE: can we hardcode 'tag_id' here or should the column name be got
         # dynamically from somewhere?
@@ -197,7 +200,7 @@ class _TaggableManager(models.Manager):
             # If str_tags has 0 elements Django actually optimizes that to not
             # do a query.  Malcolm is very smart.
             existing = manager.filter(name__in=str_tags)
-            tags_to_create = str_tags - {t.name for t in existing}
+            tags_to_create = str_tags - set(t.name for t in existing)
 
         tag_objs.update(existing)
 
@@ -359,7 +362,6 @@ class _TaggableManager(models.Manager):
         __hash__ = object.__hash__
 
 
-@total_ordering
 class TaggableManager(RelatedField, Field):
     # Field flags
     many_to_many = True
@@ -657,3 +659,6 @@ def _get_subclasses(model):
         if isinstance(field, OneToOneRel) and getattr(_remote_field(field.field), "parent_link", None):
             subclasses.extend(_get_subclasses(field.related_model))
     return subclasses
+
+
+TaggableManager = total_ordering(TaggableManager)
